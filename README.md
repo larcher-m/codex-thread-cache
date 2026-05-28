@@ -118,7 +118,10 @@ PowerShell 是 Windows 自带的，`Get-Content | ConvertFrom-Json` 没有进程
 
 ## 相关文章
 
-- [掘金：从 6 秒到 88 毫秒——Codex + DeepSeek 对话记录卡顿排查与优化](https://juejin.cn/)
+- 📝 [掘金](https://juejin.cn/post/7644745124401397802)
+- 📰 [B 站专栏](https://www.bilibili.com/opus/1207468413903962150)
+
+- [掘金：Codex + DeepSeek 对话记录卡顿排查与优化](https://juejin.cn/post/7644745124401397802)
 
 ## License
 

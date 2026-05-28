@@ -218,7 +218,7 @@ rh
 ## 链接
 
 - 📦 **GitHub**：[larcher-m/codex-thread-cache](https://github.com/larcher-m/codex-thread-cache)
-- 🎬 **B 站视频**：（发完补链接）
-- ✍️ **掘金**：（发完补链接）
+- 🎬 **B 站视频**：（录制中）
+- ✍️ **掘金**：https://juejin.cn/post/7644745124401397802
 
 有问题评论区见，好用的话点个赞让更多人看到 ✌️
