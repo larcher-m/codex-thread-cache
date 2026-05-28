@@ -1,0 +1,28 @@
+```mermaid
+---
+title: 优化前后性能对比
+---
+gantt
+    title 单次查询耗时对比（毫秒）
+    dateFormat X
+    axisFormat %s ms
+
+    section 优化前（Python -c）
+    Python 启动        :0, 2000
+    sqlite3 加载       :2000, 2500
+    数据库查询         :2500, 3000
+    JSONL 解析         :3000, 4000
+    格式化输出         :4000, 5000
+    进程退出           :5000, 6000
+
+    section 第一版（Python 读缓存）
+    Python 启动        :0, 2000
+    读 JSON 文件       :2000, 2300
+    解析输出           :2300, 3000
+    进程退出           :3000, 3300
+
+    section 终版（PowerShell 原生）
+    PS 读 JSON          :0, 50
+    ConvertFrom-Json    :50, 85
+    输出遍历            :85, 88
+```

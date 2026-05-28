@@ -1,0 +1,28 @@
+```mermaid
+flowchart LR
+    subgraph Data["数据源（Codex 内部）"]
+        SQLite["state_5.sqlite<br/>线程元数据"]
+        JSONL["rollout/*.jsonl<br/>对话内容"]
+    end
+
+    subgraph Build["缓存构建层（偶尔运行）"]
+        Builder["build_cache.py<br/>一次性批量读取"]
+    end
+
+    subgraph Cache["静态缓存"]
+        TC["thread_cache.json<br/>全部对话快照"]
+    end
+
+    subgraph Query["查询层（日常使用）"]
+        PS["read_history.ps1<br/>PowerShell 原生解析"]
+        User["用户敲 rh"]
+    end
+
+    SQLite --> Builder
+    JSONL --> Builder
+    Builder -->|"写入（仅过期时触发，0.4s）"| TC
+    TC -->|"读取（88ms）"| PS
+    PS -->|"检测过期：比较 DB 和 Cache 的修改时间"| TC
+    User -->|"rh / rh --rebuild"| PS
+    PS -->|"终端输出"| User
+</user>
