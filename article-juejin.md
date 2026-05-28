@@ -6,6 +6,8 @@ theme: smartblue
 > 🏷️ **标签**：性能优化 · PowerShell · Python · Codex · DeepSeek · 工具开发
 > 📦 **GitHub**：[larcher-m/codex-thread-cache](https://github.com/larcher-m/codex-thread-cache)
 
+# Codex + DeepSeek 用户请进：你的对话记录是不是也卡到想砸键盘？
+
 ## TL;DR
 
 Codex CLI 接入 DeepSeek 后，查看历史对话每次要等 **6 秒**。排查发现不是数据量大（仅 11 个线程、4.5MB），而是每次查询都冷启动 Python 解释器。最终方案：用 Python 一次性预建 JSON 缓存，日常查询改用 PowerShell 原生解析——**从 6000ms 降到 88ms，提升 68 倍**。两个文件、一行别名配置，即可彻底解决。
