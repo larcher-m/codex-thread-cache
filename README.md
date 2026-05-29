@@ -4,124 +4,92 @@
 [![PowerShell](https://img.shields.io/badge/PowerShell-5.1%2B-blue.svg)](https://github.com/PowerShell/PowerShell)
 [![Python](https://img.shields.io/badge/Python-3.8%2B-blue.svg)](https://www.python.org/)
 
-> 解决 Codex CLI 接入 DeepSeek 后查看历史对话严重卡顿的问题 —— 从 6 秒降到 88 毫秒。
+> 解决 Codex 接入 DeepSeek 后历史对话卡顿 & 卡死的完整方案。
 
-## 问题
+## 两个问题，一个仓库
 
-Codex 切换模型为 DeepSeek 后，每次查看历史对话记录需要等待 **6～7 秒**，因为底层用 `python -c` 内联脚本查询，每次都要冷启动 Python 解释器。
+| 问题 | 症状 | 根因 | 方案 | 文章 |
+|---|---|---|---|---|
+| **卡顿** | 切对话 6 秒 | Python 冷启动 | 预建缓存 + PowerShell 原生读取 (88ms) | [掘金·上篇](https://juejin.cn/post/7644745124401397802) |
+| **卡死** | 点击对话假死 | SQLite WAL 膨胀 (4MB) + 日志 70MB | 自动 checkpoint + 定时清理 | [掘金·后续](https://juejin.cn/post/7645141802761568299) |
 
-## 方案
-
-**两层架构**：Python 一次性预建 JSON 缓存 + PowerShell 原生零启动读取。
+## 架构
 
 ```
-┌─────────────┐      ┌──────────────────┐      ┌──────────────────┐
-│ state_5.sqlite│ ──▶ │ build_cache.py  │ ──▶ │thread_cache.json │
-│ rollout/*.jsonl│     │ (仅过期时运行)    │      │   (静态缓存)      │
-└─────────────┘      └──────────────────┘      └────────┬─────────┘
-                                                        │
-┌─────────────┐      ┌──────────────────┐               │
-│   用户敲 rh  │ ──▶ │ read_history.ps1 │ ◀─────────────┘
-└─────────────┘      │ (PowerShell 原生) │
-                     │ 88ms 秒出         │
-                     └──────────────────┘
+┌──────────────────────────────────────────────────┐
+│                   终端层（日常）                    │
+│  rh          → 列表 / 搜索 / 详情 (88ms)           │
+│  rh 关键词    → 搜索标题                            │
+│  rh id前缀    → 查看对话                            │
+└──────────────────────────────────────────────────┘
+                          │
+┌──────────────────────────────────────────────────┐
+│                   维护层（自动化）                   │
+│  codex_launcher → 清理 WAL → 启动应用（一键）       │
+│  定时任务       → 每 3 小时自动 checkpoint          │
+└──────────────────────────────────────────────────┘
+                          │
+┌──────────────────────────────────────────────────┐
+│                   构建层（偶尔）                     │
+│  build_cache.py → SQLite + JSONL → JSON 缓存       │
+│  codex_cleanup.ps1 → WAL 清理 + 日志瘦身           │
+└──────────────────────────────────────────────────┘
 ```
-
-| 场景 | 优化前 | 优化后 | 提升 |
-|---|---|---|---|
-| 列出对话列表 | ~6000ms | **88ms** | 68× |
-| 查看单个对话 | ~6000ms | **135ms** | 44× |
-| 缓存重建 | 6s × N 次 | 0.4s（自动） | — |
 
 ## 快速开始
 
-### 前置要求
-
-- Windows 10+ / Windows Server 2016+
-- PowerShell 5.1+
-- Python 3.8+（仅缓存构建时需要）
-
-### 安装
-
 ```powershell
-# 1. 克隆
+# 1. 克隆仓库
 git clone https://github.com/larcher-m/codex-thread-cache.git
 cd codex-thread-cache
 
-# 2. 首次构建缓存（后续自动）
+# 2. 构建缓存
 python build_cache.py
 
-# 3. 添加别名到 PowerShell Profile
-Add-Content $PROFILE @"
+# 3. 安装 rh 命令（任选一种）
+## 方式 A：复制到 PATH（cmd 和 PowerShell 都能用）
+copy rh.bat C:\Users\%USERNAME%\AppData\Local\Programs\Python\Python314\Scripts\rh.bat
 
-# Codex history quick access
-function Read-History { & "$PWD\read_history.ps1" @args }
-Set-Alias -Name rh -Value Read-History
-"@
+## 方式 B：PowerShell 别名
+Add-Content $PROFILE "`nfunction rh { & '$PWD\rh.ps1' @args }"
 
-# 4. 重新加载 Profile 或重开终端
-. $PROFILE
+# 4. 使用
+rh              # 秒出列表
+rh DeepSeek     # 搜索
+rh 019e6a94     # 查看详情
+
+# 5. 设置自动维护（可选但推荐）
+## 创建桌面快捷方式：指向 codex_launcher.bat，固定到任务栏
+## 设置定时任务：
+schtasks /Create /TN "Codex DB Auto Cleanup" /SC DAILY /RI 180 /DU 24:00 /IT /F `
+  /TR "powershell -WindowStyle Hidden -File %CD%\codex_cleanup.ps1"
 ```
-
-### 使用
-
-```powershell
-rh                 # 列出所有对话线程
-rh 019e64be        # 查看指定线程的完整对话内容
-rh --rebuild       # 强制刷新缓存
-```
-
-### 自动缓存维护
-
-`read_history.ps1` 每次运行时会自动比较数据库和缓存的修改时间：
-
-- 缓存新鲜 → PowerShell 原生读取，**88ms**
-- 缓存过期 → 自动调用 `build_cache.py` 重建，**~0.4s**
-- 用户完全无感，只需敲 `rh`
 
 ## 文件说明
 
 | 文件 | 说明 |
 |---|---|
 | `build_cache.py` | Python 脚本，一次性读取 SQLite + JSONL，生成 `thread_cache.json` |
-| `read_history.ps1` | PowerShell 脚本，原生解析 JSON 缓存并展示，自动检测过期 |
-| `article-juejin.md` | 掘金技术文章（完整排查过程 + 设计思路） |
-| `architecture.mermaid` | 系统架构 Mermaid 图 |
-| `perf-comparison.mermaid` | 性能对比甘特图 |
+| `rh.ps1` | PowerShell 脚本，原生解析 JSON 缓存，支持列表/搜索/详情 |
+| `rh.bat` | cmd 包装器，复制到 PATH 后可在任何终端使用 `rh` |
+| `codex_cleanup.ps1` | WAL checkpoint + TRACE/DEBUG 日志清理 + VACUUM |
+| `codex_launcher.ps1` | 清理 + 启动 Codex 桌面应用 |
+| `codex_launcher.bat` | 启动器 bat 包装器，双击即用 |
 
-## 设计思路
+## 性能数据
 
-### 为什么不是"优化查询"？
-
-11 个线程、4.5MB 数据——任何 SQL 查询都不应该慢。真正的瓶颈是 **Python 冷启动**：
-
-```
-python -c "import sqlite3; ..."
-         ↑ 每次都要走这套流程
-```
-
-每次 `python -c` 都要启动解释器 → 加载模块 → 连接数据库 → 解析 JSONL → 退出进程。不是查询慢，是启动慢。
-
-### 为什么选 PowerShell 做日常读取？
-
-PowerShell 是 Windows 自带的，`Get-Content | ConvertFrom-Json` 没有进程启动开销。对于一个高频操作（每天几十次），零启动成本比任何查询优化都重要。
-
-### 核心原则
-
-1. **预计算 > 实时查询** — SQL + JSONL → JSON 缓存，一次性完成
-2. **用对的工具做对的事** — Python 做批量数据清洗，Shell 做高频轻量读取
-3. **自动化过期检测** — 用户只需一个命令，不操心缓存状态
-
-## 适用范围
-
-任何使用「SQLite + JSONL」存储、且通过 Python 内联脚本查询的场景，都可以用同样的「预建缓存 + 原生解析」思路优化。
+| 场景 | 原始 | 上篇方案 | 本篇补充 |
+|---|---|---|---|
+| 终端列表 | 6000ms | 88ms (68×) | 88ms |
+| 终端详情 | 6000ms | 135ms (44×) | 135ms |
+| 应用侧边栏 | 6s + 偶尔假死 | 需手动操作 | **零维护** |
+| 缓存重建 | 6s × N | 0.4s 自动 | 0.4s 自动 |
 
 ## 相关文章
 
-- 📝 [掘金](https://juejin.cn/post/7644745124401397802)
+- 📝 [掘金·上篇：Python 冷启动排查与两层缓存方案](https://juejin.cn/post/7644745124401397802)
+- 📝 掘金·后续：SQLite WAL 膨胀与自动维护方案
 - 📰 [B 站专栏](https://www.bilibili.com/opus/1207468413903962150)
-
-- [掘金：Codex + DeepSeek 对话记录卡顿排查与优化](https://juejin.cn/post/7644745124401397802)
 
 ## License
 
